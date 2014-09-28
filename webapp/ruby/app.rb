@@ -40,6 +40,21 @@ module Isucon4
                  Time.now, user_id, login, request.ip, succeeded ? 1 : 0)
       end
 
+      def increment_failure_count_ip
+        db.xquery("INSERT INTO failure_count_ip" \
+                  " (`ip`, `count`)" \
+                  " VALUES (?, 1)" \
+                  "ON DUPLICATE KEY UPDATE count=count+1",
+                 request.ip)
+      end 
+
+      def clear_failure_count_ip
+        db.xquery("UPDATE failure_count_ip" \
+                  " SET count = 0" \
+                  " where ip = ?",
+                  request.ip)
+      end 
+
       def user_locked?(user)
         return nil unless user
         log = db.xquery("SELECT COUNT(1) AS failures FROM login_log WHERE user_id = ? AND id > IFNULL((select id from login_log where user_id = ? AND succeeded = 1 ORDER BY id DESC LIMIT 1), 0);", user['id'], user['id']).first
@@ -58,22 +73,27 @@ module Isucon4
 
         if ip_banned?
           login_log(false, login, user ? user['id'] : nil)
+          increment_failure_count_ip
           return [nil, :banned]
         end
 
         if user_locked?(user)
           login_log(false, login, user['id'])
+          increment_failure_count_ip
           return [nil, :locked]
         end
 
         if user && calculate_password_hash(password, user['salt']) == user['password_hash']
           login_log(true, login, user['id'])
+          clear_failure_count_ip
           [user, nil]
         elsif user
           login_log(false, login, user['id'])
+          increment_failure_count_ip
           [nil, :wrong_password]
         else
           login_log(false, login)
+          increment_failure_count_ip
           [nil, :wrong_login]
         end
       end
@@ -177,3 +197,4 @@ module Isucon4
     end
   end
 end
+
